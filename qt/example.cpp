@@ -242,7 +242,11 @@ public:
 	void keyPressEvent(QKeyEvent* event) {
 		switch(event->key()) {
 			case Qt::Key_Escape: close(); break;
-            case Qt::Key_Space: bake(&m_scene); break;
+            case Qt::Key_Space:
+                QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
+                bake(&m_scene);
+                QApplication::restoreOverrideCursor();
+                break;
 			default: event->ignore();
 			break;
 		}
@@ -619,15 +623,15 @@ int main(int argc, char *argv[]) {
     app.setOrganizationDomain("komsoft.ath.cx");
 
 	QSurfaceFormat surface_format = QSurfaceFormat::defaultFormat();
-	surface_format.setAlphaBufferSize( 0 );
-	surface_format.setDepthBufferSize( 0 );
+	surface_format.setAlphaBufferSize( 8 );
+	surface_format.setDepthBufferSize( 24 );
 	// surface_format.setRedBufferSize( 8 );
 	// surface_format.setBlueBufferSize( 8 );
 	// surface_format.setGreenBufferSize( 8 );
 	// surface_format.setOption( QSurfaceFormat::DebugContext );
 	// surface_format.setProfile( QSurfaceFormat::NoProfile );
 	// surface_format.setRenderableType( QSurfaceFormat::OpenGLES );
-	// surface_format.setSamples( 4 );
+	surface_format.setSamples( 4 );
 	// surface_format.setStencilBufferSize( 8 );
 	// surface_format.setSwapBehavior( QSurfaceFormat::DefaultSwapBehavior );
 	// surface_format.setSwapInterval( 1 );

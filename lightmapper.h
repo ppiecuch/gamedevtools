@@ -331,14 +331,17 @@ struct lm_context
 		{
 			GLuint programID;
 			GLuint hemispheresTextureID;
+			GLuint hemispheresTextureSizeID;
 			GLuint weightsTextureID;
 			GLuint weightsTextureSizeID;
 			GLuint weightsTexture;
+			int weightsTextureSize[2];
 		} firstPass;
 		struct
 		{
 			GLuint programID;
 			GLuint hemispheresTextureID;
+			GLuint hemispheresTextureSizeID;
 		} downsamplePass;
 		struct
 		{
@@ -606,17 +609,18 @@ static void lm_beginProcessHemisphereBatch(lm_context *ctx)
 	glViewport(0, 0, outHemiSize * ctx->hemisphere.fbHemiCountX, outHemiSize * ctx->hemisphere.fbHemiCountY);
 	glUseProgram(ctx->hemisphere.firstPass.programID);
 	glUniform1i(ctx->hemisphere.firstPass.hemispheresTextureID, 0);
+	glUniform2iv(ctx->hemisphere.firstPass.hemispheresTextureSizeID, 1, ctx->hemisphere.fbTextureSize[fbRead]);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, ctx->hemisphere.fbTexture[fbRead]);
 	glUniform1i(ctx->hemisphere.firstPass.weightsTextureID, 1);
-	glUniform2iv(ctx->hemisphere.firstPass.weightsTextureSizeID, 1, ctx->hemisphere.fbTextureSize[fbRead]);
+	glUniform2iv(ctx->hemisphere.firstPass.weightsTextureSizeID, 1, ctx->hemisphere.firstPass.weightsTextureSize);
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, ctx->hemisphere.firstPass.weightsTexture);
 	glActiveTexture(GL_TEXTURE0);
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	glBindTexture(GL_TEXTURE_2D, 0);
 
-#if 0
+#if 1
 	// debug output
 	int w = outHemiSize * ctx->hemisphere.fbHemiCountX, h = outHemiSize * ctx->hemisphere.fbHemiCountY;
 	glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
@@ -624,7 +628,7 @@ static void lm_beginProcessHemisphereBatch(lm_context *ctx)
 	glReadBuffer(GL_COLOR_ATTACHMENT0);
 	float *image = new float[3 * w * h];
 	glReadPixels(0, 0, w, h, GL_RGB, GL_FLOAT, image);
-	lmImageSaveTGAf("firstpass.png", image, w, h, 3);
+	lmImageSaveTGAf("debug_firstpass.tga", image, w, h, 3);
 	delete[] image;
 #endif
 
@@ -638,6 +642,7 @@ static void lm_beginProcessHemisphereBatch(lm_context *ctx)
 		glBindFramebuffer(GL_FRAMEBUFFER, ctx->hemisphere.fb[fbWrite]);
 		glViewport(0, 0, outHemiSize * ctx->hemisphere.fbHemiCountX, outHemiSize * ctx->hemisphere.fbHemiCountY);
 		glBindTexture(GL_TEXTURE_2D, ctx->hemisphere.fbTexture[fbRead]);
+        glUniform2iv(ctx->hemisphere.downsamplePass.hemispheresTextureSizeID, 1, ctx->hemisphere.fbTextureSize[fbRead]);
 		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 		glBindTexture(GL_TEXTURE_2D, 0);
 	}
@@ -1153,10 +1158,11 @@ lm_context *lmCreate(int hemisphereSize, float zNear, float zFar,
             "#extension GL_EXT_gpu_shader4 : require\n"
 
             "uniform sampler2D hemispheres;\n"
+			"uniform ivec2 hemispheresTextureSize;\n"
 			"uniform sampler2D weights;\n"
-			"uniform vec2 weightsTextureSize;\n"
+			"uniform ivec2 weightsTextureSize;\n"
 
-            "vec4 texelFetch(sampler2D tex, ivec2 size, ivec2 coord)\n"
+            "vec4 texelFetch(sampler2D tex, ivec2 size, ivec2 coord, int lod)\n"
             "{\n"
             "    vec2 fCoord = vec2((2.0*coord.x + 1.0)/(2.0*float(size.x)),(2.0*coord.y + 1.0)/(2.0*float(size.y)));\n"
             "    return texture2D(tex, fCoord);\n"
@@ -1164,8 +1170,8 @@ lm_context *lmCreate(int hemisphereSize, float zNear, float zFar,
 
             "vec4 weightedSample(ivec2 h_uv, ivec2 w_uv, ivec2 quadrant)\n"
 			"{\n"
-				"vec4 sample = texelFetch(hemispheres, h_uv + quadrant, ivec2(0));\n"
-				"vec2 weight = texelFetch(weights, w_uv + quadrant, ivec2(0)).rg;\n"
+				"vec4 sample = texelFetch(hemispheres, hemispheresTextureSize, h_uv + quadrant, 0);\n"
+				"vec2 weight = texelFetch(weights, weightsTextureSize, w_uv + quadrant, 0).rg;\n"
 				"return vec4(sample.rgb * weight.r, sample.a * weight.g);\n"
 			"}\n"
 
@@ -1202,6 +1208,7 @@ lm_context *lmCreate(int hemisphereSize, float zNear, float zFar,
 			return NULL;
 		}
 		ctx->hemisphere.firstPass.hemispheresTextureID = glGetUniformLocation(ctx->hemisphere.firstPass.programID, "hemispheres");
+		ctx->hemisphere.firstPass.hemispheresTextureSizeID = glGetUniformLocation(ctx->hemisphere.firstPass.programID, "hemispheresTextureSize");
 		ctx->hemisphere.firstPass.weightsTextureID = glGetUniformLocation(ctx->hemisphere.firstPass.programID, "weights");
 		ctx->hemisphere.firstPass.weightsTextureSizeID = glGetUniformLocation(ctx->hemisphere.firstPass.programID, "weightsTextureSize");
 	}
@@ -1224,8 +1231,9 @@ lm_context *lmCreate(int hemisphereSize, float zNear, float zFar,
             "#extension GL_EXT_gpu_shader4 : require\n"
 
             "uniform sampler2D hemispheres;\n"
+			"uniform ivec2 hemispheresTextureSize;\n"
 
-            "vec4 texelFetch(sampler2D tex, ivec2 size, ivec2 coord)\n"
+            "vec4 texelFetch(sampler2D tex, ivec2 size, ivec2 coord, int lod)\n"
             "{\n"
             "    vec2 fCoord = vec2((2.0*coord.x + 1.0)/(2.0*float(size.x)),(2.0*coord.y + 1.0)/(2.0*float(size.y)));\n"
             "    return texture2D(tex, fCoord);\n"
@@ -1234,10 +1242,10 @@ lm_context *lmCreate(int hemisphereSize, float zNear, float zFar,
 			"void main()\n"
 			"{\n" // this is a sum downsampling pass (alpha component contains the weighted valid sample count)
 				"ivec2 h_uv = ivec2((gl_FragCoord.xy - vec2(0.5)) * 2.0 + vec2(0.01));\n"
-				"vec4 lb = texelFetch(hemispheres, h_uv + ivec2(0, 0), ivec2(0));\n"
-				"vec4 rb = texelFetch(hemispheres, h_uv + ivec2(1, 0), ivec2(0));\n"
-				"vec4 lt = texelFetch(hemispheres, h_uv + ivec2(0, 1), ivec2(0));\n"
-				"vec4 rt = texelFetch(hemispheres, h_uv + ivec2(1, 1), ivec2(0));\n"
+				"vec4 lb = texelFetch(hemispheres, hemispheresTextureSize, h_uv + ivec2(0, 0), 0);\n"
+				"vec4 rb = texelFetch(hemispheres, hemispheresTextureSize, h_uv + ivec2(1, 0), 0);\n"
+				"vec4 lt = texelFetch(hemispheres, hemispheresTextureSize, h_uv + ivec2(0, 1), 0);\n"
+				"vec4 rt = texelFetch(hemispheres, hemispheresTextureSize, h_uv + ivec2(1, 1), 0);\n"
 				"gl_FragColor = lb + rb + lt + rt;\n"
 			"}\n";
 		ctx->hemisphere.downsamplePass.programID = lm_LoadProgram(vs, fs);
@@ -1253,6 +1261,7 @@ lm_context *lmCreate(int hemisphereSize, float zNear, float zFar,
 			return NULL;
 		}
 		ctx->hemisphere.downsamplePass.hemispheresTextureID = glGetUniformLocation(ctx->hemisphere.downsamplePass.programID, "hemispheres");
+		ctx->hemisphere.downsamplePass.hemispheresTextureSizeID = glGetUniformLocation(ctx->hemisphere.downsamplePass.programID, "hemispheresTextureSize");
 	}
 
 	// pbo (needed for async GPU->CPU transfers of the downsampled hemisphere results)
@@ -1263,6 +1272,8 @@ lm_context *lmCreate(int hemisphereSize, float zNear, float zFar,
 
 	// hemisphere weights texture
 	glGenTextures(1, &ctx->hemisphere.firstPass.weightsTexture);
+    ctx->hemisphere.firstPass.weightsTextureSize[0] = 3 * ctx->hemisphere.size;
+    ctx->hemisphere.firstPass.weightsTextureSize[1] = ctx->hemisphere.size;
 	lmSetHemisphereWeights(ctx, lm_defaultWeights, 0);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
